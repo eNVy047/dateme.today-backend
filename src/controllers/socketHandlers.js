@@ -26,6 +26,14 @@ export class SocketHandler {
       }
     });
 
+    // Typing status
+    socket.on('typing', (data) => {
+      const roomId = this.matchmaker.socketToRoom.get(socket.id);
+      if (roomId) {
+        socket.to(roomId).emit('partner_typing', data.isTyping);
+      }
+    });
+
     // Next partner request
     socket.on('next', () => {
       const roomId = this.matchmaker.socketToRoom.get(socket.id);

@@ -1,5 +1,5 @@
 import { Room } from '../models/Room.js';
-import { MAX_ROOM_SIZE } from '../config/constants.js';
+import chalk from "chalk";
 
 export class Matchmaker {
   constructor(io) {
@@ -10,29 +10,53 @@ export class Matchmaker {
   }
 
   findMatchFor(socket) {
+    // Remove disconnected users from waiting list
+    const validWaitingUsers = new Set();
+    for (const socketId of this.waitingUsers) {
+      if (this.io.sockets.sockets.get(socketId)) {
+        validWaitingUsers.add(socketId);
+        //console.log(chalk.bgRed`user added bro`);
+      }
+    }
+    this.waitingUsers = validWaitingUsers;
+
     if (this.waitingUsers.size > 0) {
-      const otherSocketId = this.waitingUsers.values().next().value;
+      // Get first available user
+      const otherSocketId = Array.from(this.waitingUsers)[0];
       this.waitingUsers.delete(otherSocketId);
       
       const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Get other socket instance
+      const otherSocket = this.io.sockets.sockets.get(otherSocketId);
+      if (!otherSocket) {
+        // If other user disconnected, try again
+        this.findMatchFor(socket);
+        return;
+      }
+      
+      // Join both sockets to room
+      [socket, otherSocket].forEach(s => {
+        s.join(roomId);
+        this.socketToRoom.set(s.id, roomId);
+        //console.log(chalk.bgRed`user added bro`);
+      });
+      
+      // Create room
       const room = new Room(roomId);
-      
       room.addUser(socket.id);
-      room.addUser(otherSocketId);
-      
-      socket.join(roomId);
-      this.io.sockets.sockets.get(otherSocketId)?.join(roomId);
-      
+      room.addUser(otherSocket.id);
       this.activeRooms.set(roomId, room);
-      this.socketToRoom.set(socket.id, roomId);
-      this.socketToRoom.set(otherSocketId, roomId);
       
+      // Notify both users
       this.io.to(roomId).emit('chat_started', { roomId });
-      return room;
     } else {
+      // No one waiting, add to queue
       this.waitingUsers.add(socket.id);
-      socket.emit('waiting_for_match');
-      return null;
+      socket.on('find_match', () => {
+    console.log('Client requested match:', socket.id);
+    socket.emit('waiting_for_match');
+  });
     }
   }
 }
